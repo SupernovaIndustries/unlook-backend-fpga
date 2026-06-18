@@ -24,6 +24,10 @@ csynth_design
 # RTL/C co-simulation (cycle-accurate parity).
 cosim_design
 # Package as an IP for the Vivado block design.
+# NOTE: the Vivado 2021.1 batch IP packager can fail here with
+#   "'<bignum>' is an invalid argument" -- a known tool bug (the date-derived
+# core_revision overflows int32), NOT a core problem. Export from the Vitis HLS
+# GUI or use 2025.x as a workaround. csynth/cosim above are unaffected.
 export_design -format ip_catalog -display_name "Unlook SGM-Census" -vendor supernova -library unlook -version 1.0
 
 exit

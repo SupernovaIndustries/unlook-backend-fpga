@@ -20,8 +20,8 @@
 #define SGM_LAYOUT_VERSION 1u
 
 /* DDR3 byte offsets (relative to the core's gmem base / the host's DMA base for
- * the MIG). The host touches only PARAMS/LEFT/RIGHT/DISP; CENSUS_*/FWDAGG are
- * core-private scratch. Slots sized for the MAX operating point below.
+ * the MIG). The host touches only PARAMS/LEFT/RIGHT/DISP; the CENSUS and FWDAGG
+ * regions are core-private scratch. Slots sized for the MAX operating point below.
  *
  * DDR3 sizing: FWDAGG holds width*height*numDisparities * 2 bytes. At the
  * default 680x420 / D=128 that is ~73 MB, so the card needs >= ~256 MB DDR3.

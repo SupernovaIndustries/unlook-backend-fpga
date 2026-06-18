@@ -13,6 +13,12 @@ compile_commands.json
 *.so
 *.so.*
 
+# ---- Vitis HLS project / output --------------------------------------------
+gateware/hls/sgm_hls_prj/
+gateware/hls/*.log
+vitis_hls.log
+gateware/hls/*.bin       # generated reference vectors (params/left/right/disp_golden)
+
 # ---- Vivado / Xilinx gateware artifacts ------------------------------------
 # Keep sources (rtl/, constraints/, sim/, the .tcl project generator); ignore
 # the regenerable project + tool output.
