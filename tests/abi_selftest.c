@@ -2,10 +2,10 @@
  * abi_selftest.c -- dlopen the built libunlook_fpga_backend.so and exercise the
  * full C ABI (probe -> create -> compute -> destroy) on a synthetic stereo pair.
  *
- * Backend-agnostic: with the mock backend it asserts a real disparity is
- * produced; with the xdma backend on a host WITHOUT the FPGA it cleanly SKIPs
- * (probe reports not-present) and still passes. This is the fixture that lets us
- * validate the SDK <-> backend contract with no Artix-7 attached.
+ * On a host WITHOUT the FPGA present, probe() reports not-present and the test
+ * cleanly SKIPs (still passes) -- so it is safe to run anywhere. With the card
+ * present it exercises the full probe -> create -> compute path and checks a
+ * non-trivial disparity comes back.
  */
 #include <dlfcn.h>
 #include <stdint.h>

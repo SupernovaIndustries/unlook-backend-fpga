@@ -1,16 +1,17 @@
 /**
  * @file xdma_backend.cpp
- * @brief Real Unlook FPGA stereo backend C ABI over Xilinx XDMA.
+ * @brief Unlook FPGA stereo backend C ABI over Xilinx XDMA, driving the Vitis
+ *        HLS sgm_census core on an Artix-7 XC7A200T.
  *
- * Builds `libunlook_fpga_backend.so` driving the Artix-7 XC7A200T SGM-Census
- * core: handshake on the AXI-Lite ID/VERSION registers, H2C-upload the rectified
- * pair, trigger, poll STATUS, C2D-download the int16 (x16) disparity.
+ * Flow per compute():
+ *   1. write the SgmHwParams block + the rectified L/R images into DDR3 (H2C),
+ *      at the fixed offsets in sgm_mem_layout.h;
+ *   2. point the core's gmem master at the DDR3 base (AXI-Lite) and set ap_start;
+ *   3. poll ap_done with a steady-clock timeout;
+ *   4. read the int16 (x16) disparity back from DDR3 (C2D).
  *
- * Select at configure time: -DUNLOOK_FPGA_BACKEND=xdma.
- *
- * NOTE: the register protocol and card-buffer layout are defined in
- * RegisterMap.hpp and MUST match the gateware. Sections marked TODO(gateware)
- * are the points to confirm once the RTL register file is frozen.
+ * Disparity is int16 scaled x16 (invalid == 0) -- the exact SGMCensus layout, so
+ * the SDK's Q matrix / reprojectImageTo3D is unchanged. Never throws.
  */
 
 #include "unlook_fpga_backend.h"
@@ -18,12 +19,15 @@
 #include <algorithm>
 #include <chrono>
 #include <cstring>
+#include <new>
 #include <string>
 #include <thread>
+#include <vector>
 
+#include "FpgaDetector.hpp"
 #include "RegisterMap.hpp"
 #include "XdmaTransport.hpp"
-#include "FpgaDetector.hpp"
+#include "sgm_mem_layout.h"
 
 namespace {
 
@@ -40,28 +44,26 @@ struct XdmaInstance {
     UnlookSgmParams params;
     XdmaTransport   transport;
 
-    XdmaInstance(const UnlookSgmParams& p)
+    explicit XdmaInstance(const UnlookSgmParams& p)
         : params(p),
           transport(p.devicePath[0] ? p.devicePath : "/dev/xdma0",
                     p.dmaTimeoutMs > 0 ? p.dmaTimeoutMs : 33) {}
 };
 
-/// Program the per-instance, frame-invariant SGM parameters + buffer addresses.
-bool programStaticConfig(XdmaInstance* inst) {
-    auto& t = inst->transport;
-    const auto& p = inst->params;
-    bool ok = true;
-    ok &= t.writeReg(reg::MIN_DISP, static_cast<uint32_t>(p.minDisparity));
-    ok &= t.writeReg(reg::NUM_DISP, static_cast<uint32_t>(p.numDisparities));
-    ok &= t.writeReg(reg::VSEARCH, static_cast<uint32_t>(p.verticalSearchRange));
-    ok &= t.writeReg(reg::P1, static_cast<uint32_t>(p.p1));
-    ok &= t.writeReg(reg::P2, static_cast<uint32_t>(p.p2));
-    ok &= t.writeReg(reg::UNIQUENESS, static_cast<uint32_t>(p.uniquenessRatio));
-    ok &= t.writeReg(reg::FLAGS, p.enableSubpixel ? reg::FLAGS_SUBPIXEL : 0u);
-    ok &= t.writeReg(reg::LEFT_ADDR, static_cast<uint32_t>(reg::kLeftBufAddr));
-    ok &= t.writeReg(reg::RIGHT_ADDR, static_cast<uint32_t>(reg::kRightBufAddr));
-    ok &= t.writeReg(reg::DISP_ADDR, static_cast<uint32_t>(reg::kDispBufAddr));
-    return ok;
+SgmHwParams toHwParams(const UnlookSgmParams& p, int32_t width, int32_t height) {
+    SgmHwParams hw;
+    std::memset(&hw, 0, sizeof(hw));
+    hw.width               = width;
+    hw.height              = height;
+    hw.minDisparity        = p.minDisparity;
+    hw.numDisparities      = p.numDisparities;
+    hw.verticalSearchRange = p.verticalSearchRange;
+    hw.censusWindowSize    = p.censusWindowSize;
+    hw.p1                  = p.p1;
+    hw.p2                  = p.p2;
+    hw.uniquenessRatio     = p.uniquenessRatio;
+    hw.enableSubpixel      = p.enableSubpixel;
+    return hw;
 }
 
 } // namespace
@@ -87,23 +89,22 @@ int unlook_fpga_probe(const char* devicePath, UnlookFpgaInfo* outInfo) {
 
 void* unlook_fpga_create(const UnlookSgmParams* params) {
     if (!params) return nullptr;
+
+    const std::string dev = params->devicePath[0] ? params->devicePath : "/dev/xdma0";
+    if (!probeFpga(dev).present) return nullptr;
+
     auto* inst = new (std::nothrow) XdmaInstance(*params);
     if (!inst) return nullptr;
-
     if (!inst->transport.open()) { delete inst; return nullptr; }
 
-    // Handshake: ID magic + (optional) version match.
-    uint32_t id = 0, version = 0;
-    if (!inst->transport.readReg(reg::ID, id) || id != reg::kMagic) {
-        delete inst; return nullptr;
+    // Point the core's gmem AXI-master at the DDR3 base (64-bit address reg).
+    if (!inst->transport.writeReg(reg::GMEM_ADDR_LO,
+                                  static_cast<uint32_t>(reg::kDdr3Base & 0xFFFFFFFFu)) ||
+        !inst->transport.writeReg(reg::GMEM_ADDR_HI,
+                                  static_cast<uint32_t>(reg::kDdr3Base >> 32))) {
+        delete inst;
+        return nullptr;
     }
-    inst->transport.readReg(reg::VERSION, version);
-    if (params->expectedBitstreamVersion != 0 &&
-        version != params->expectedBitstreamVersion) {
-        delete inst; return nullptr;
-    }
-
-    if (!programStaticConfig(inst)) { delete inst; return nullptr; }
     return inst;
 }
 
@@ -124,9 +125,8 @@ int unlook_fpga_compute(void* handle,
     auto& t = inst->transport;
     const auto t0 = std::chrono::steady_clock::now();
 
-    const size_t pixels    = static_cast<size_t>(width) * height;
-    const size_t imgBytes  = pixels;                 // 8-bit grayscale
-    const size_t dispBytes = pixels * sizeof(int16_t);
+    const size_t imgBytes  = static_cast<size_t>(width) * height;
+    const size_t dispBytes = imgBytes * sizeof(int16_t);
 
     auto bail = [&](const std::string& msg) -> int {
         if (stats) setStr(stats->errorMessage, sizeof(stats->errorMessage),
@@ -134,36 +134,38 @@ int unlook_fpga_compute(void* handle,
         return 1;
     };
 
-    if (!t.writeReg(reg::IMG_W, static_cast<uint32_t>(width)))  return bail("write IMG_W");
-    if (!t.writeReg(reg::IMG_H, static_cast<uint32_t>(height))) return bail("write IMG_H");
+    // 1. params + images -> DDR3
+    const SgmHwParams hw = toHwParams(inst->params, width, height);
+    if (!t.writeH2C(&hw, sizeof(hw), reg::kDdr3Base + SGM_OFF_PARAMS))
+        return bail("H2C params");
+    if (!t.writeH2C(leftGray, imgBytes, reg::kDdr3Base + SGM_OFF_LEFT))
+        return bail("H2C left");
+    if (!t.writeH2C(rightGray, imgBytes, reg::kDdr3Base + SGM_OFF_RIGHT))
+        return bail("H2C right");
 
-    if (!t.writeH2C(leftGray,  imgBytes, reg::kLeftBufAddr))  return bail("H2C left");
-    if (!t.writeH2C(rightGray, imgBytes, reg::kRightBufAddr)) return bail("H2C right");
+    // 2. start the HLS core (ap_start) -- ap_ctrl_hs.
+    if (!t.writeReg(reg::AP_CTRL, reg::AP_START)) return bail("write ap_start");
 
-    if (!t.writeReg(reg::CTRL, reg::CTRL_START)) return bail("write CTRL.START");
-
-    // Poll STATUS for DONE with a steady-clock ceiling; short sleeps avoid a
-    // busy-spin contending with the camera/scan threads.
+    // 3. poll ap_done with a steady-clock ceiling (short sleeps, no busy-spin).
     const auto deadline = t0 + std::chrono::milliseconds(t.dmaTimeoutMs());
-    uint32_t status = 0;
+    uint32_t ctrl = 0;
     for (;;) {
-        if (!t.readReg(reg::STATUS, status)) return bail("read STATUS");
-        if (status & reg::STATUS_ERROR) return bail("core reported STATUS.ERROR");
-        if (status & reg::STATUS_DONE) break;
+        if (!t.readReg(reg::AP_CTRL, ctrl)) return bail("read ap_ctrl");
+        if (ctrl & reg::AP_DONE) break;
         if (std::chrono::steady_clock::now() >= deadline) {
             if (stats) setStr(stats->errorMessage, sizeof(stats->errorMessage),
-                              "FPGA DMA/compute timeout");
-            return 2;  // distinct code: lets the host audit FPGA_DMA_TIMEOUT
+                              "FPGA compute timeout (ap_done not asserted)");
+            return 2;  // distinct code -> host audits FPGA_DMA_TIMEOUT
         }
         std::this_thread::sleep_for(std::chrono::microseconds(50));
     }
 
-    if (!t.readC2D(disparityX16Out, dispBytes, reg::kDispBufAddr))
+    // 4. disparity <- DDR3
+    if (!t.readC2D(disparityX16Out, dispBytes, reg::kDdr3Base + SGM_OFF_DISP))
         return bail("C2D disparity");
 
-    // Validity stats (invalid == 0), matching the SGMCensus convention.
     long long valid = 0;
-    for (size_t i = 0; i < pixels; ++i) if (disparityX16Out[i] != 0) ++valid;
+    for (size_t i = 0; i < imgBytes; ++i) if (disparityX16Out[i] != 0) ++valid;
 
     const auto t1 = std::chrono::steady_clock::now();
     if (stats) {
@@ -171,7 +173,7 @@ int unlook_fpga_compute(void* handle,
             std::chrono::duration<double, std::milli>(t1 - t0).count();
         stats->validPixels  = static_cast<int32_t>(valid);
         stats->validPercent = 100.0 * static_cast<double>(valid) /
-                              static_cast<double>(pixels);
+                              static_cast<double>(imgBytes);
         stats->usedFpga = 1;
     }
     return 0;

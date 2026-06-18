@@ -1,17 +1,48 @@
 #include "FpgaDetector.hpp"
 
+#include <dirent.h>
 #include <sys/stat.h>
 
+#include <cstdio>
+#include <fstream>
+#include <string>
+
 #include "RegisterMap.hpp"
-#include "XdmaTransport.hpp"
 
 namespace unlook_fpga {
 
 namespace {
+
 bool nodeExists(const std::string& path) {
     struct stat st {};
     return ::stat(path.c_str(), &st) == 0;
 }
+
+/// Scan /sys/bus/pci/devices/*/vendor for the Xilinx vendor id (0x10ee).
+/// Returns true and fills @p deviceIdOut if found.
+bool findXilinxPciDevice(uint16_t& deviceIdOut) {
+    DIR* d = ::opendir("/sys/bus/pci/devices");
+    if (!d) return false;
+    bool found = false;
+    for (dirent* e = ::readdir(d); e != nullptr && !found; e = ::readdir(d)) {
+        if (e->d_name[0] == '.') continue;
+        const std::string base = std::string("/sys/bus/pci/devices/") + e->d_name;
+        std::ifstream vf(base + "/vendor");
+        if (!vf) continue;
+        unsigned vendor = 0;
+        vf >> std::hex >> vendor;
+        if (vendor == reg::kXilinxVendorId) {
+            std::ifstream df(base + "/device");
+            unsigned dev = 0;
+            if (df) df >> std::hex >> dev;
+            deviceIdOut = static_cast<uint16_t>(dev);
+            found = true;
+        }
+    }
+    ::closedir(d);
+    return found;
+}
+
 } // namespace
 
 ProbeResult probeFpga(const std::string& devicePrefix) {
@@ -19,31 +50,30 @@ ProbeResult probeFpga(const std::string& devicePrefix) {
     r.devicePath = devicePrefix;
 
     const std::string userNode = devicePrefix + "_user";
-    if (!nodeExists(userNode)) {
-        r.detail = "no XDMA device node (" + userNode + ")";
+    const std::string h2cNode  = devicePrefix + "_h2c_0";
+    const std::string c2dNode  = devicePrefix + "_c2d_0";
+    if (!nodeExists(userNode) || !nodeExists(h2cNode) || !nodeExists(c2dNode)) {
+        r.detail = "XDMA device nodes missing (" + devicePrefix +
+                   "_user/_h2c_0/_c2d_0) -- driver loaded?";
         return r;
     }
 
-    // Open briefly and confirm the core identifies itself via the ID magic.
-    XdmaTransport t(devicePrefix, /*dmaTimeoutMs*/ 33);
-    if (!t.open()) {
-        r.detail = "device present but open failed: " + t.lastError();
+    uint16_t deviceId = 0;
+    if (!findXilinxPciDevice(deviceId)) {
+        r.detail = "XDMA nodes present but no Xilinx (0x10ee) PCI device found";
         return r;
     }
 
-    uint32_t id = 0, version = 0;
-    if (!t.readReg(reg::ID, id) || id != reg::kMagic) {
-        r.detail = "ID register mismatch (got 0x" + std::to_string(id) +
-                   ", expected Unlook core)";
-        return r;
-    }
-    t.readReg(reg::VERSION, version);
+    char detail[128];
+    std::snprintf(detail, sizeof(detail),
+                  "Unlook XC7A200T (XDMA, PCI 0x10ee:0x%04x) on %s",
+                  deviceId, devicePrefix.c_str());
 
     r.present          = true;
-    r.pciVendorId      = 0x10ee;   // Xilinx (the core answered on the XDMA BAR)
-    r.bitstreamVersion = version;
-    r.detail           = "Unlook XC7A200T core v" + std::to_string(version) +
-                         " on " + devicePrefix;
+    r.pciVendorId      = reg::kXilinxVendorId;
+    r.pciDeviceId      = deviceId;
+    r.bitstreamVersion = 0;  // tracked via firmware provenance, not a runtime reg
+    r.detail           = detail;
     return r;
 }
 

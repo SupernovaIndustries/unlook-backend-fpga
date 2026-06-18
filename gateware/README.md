@@ -1,55 +1,50 @@
 # Unlook SGM-Census Gateware (Artix-7 XC7A200T)
 
-FPGA implementation of the Unlook SGM-Census stereo matcher. Drop-in accelerator
-for the SDK CPU path: same disparity geometry (int16 ×16, invalid == 0) so
-`reprojectImageTo3D(Q)` downstream is unchanged.
+FPGA implementation of the Unlook SGM-Census stereo matcher, written in **Vitis HLS
+(C++)** and packaged as an AXI IP that drops into the rigoorozco `xdma_ddr3`
+reference design. Drop-in for the SDK CPU path: same disparity geometry (int16 ×16,
+invalid == 0) so `reprojectImageTo3D(Q)` downstream is unchanged.
 
-## Target & interface
-- **Device**: Xilinx Artix-7 **XC7A200T** (M.2 card; DDR3 via MIG, config flash).
-  Budget: ~215K logic cells, ~269K LUT, 740 DSP48, ~13 Mb BRAM.
-- **Host link**: PCIe x1 Gen2 via the **XDMA** IP.
-  - AXI-Lite (`_user` BAR) → control/status register file (see
-    [`../host/xdma/RegisterMap.hpp`](../host/xdma/RegisterMap.hpp) — the single
-    source of truth for offsets, the `UNLK` ID magic, and `kCoreVersion`).
-  - H2C → upload rectified L/R 8-bit images to card buffers.
-  - C2D → return the int16 ×16 disparity map.
-- **Operating point** (from `calibration.yaml`): frame 800×600, scan ROI
-  **680×420**, `numDisparities` per working distance (128–256), **vertical
-  search ±2** (mean epipolar 0.383 px / max 2.435 px → ±2 suffices; the CPU
-  default ±8 is intentionally dropped on FPGA).
+## Why HLS
+The core is a faithful C++ port of `unlook-sdk/src/stereo/SGMCensus.cpp`, so parity
+with the CPU is verifiable (csim/cosim vs the CPU golden) and the design is easy to
+tweak/optimize on hardware with Claude Code. Hand-RTL only if a hot loop later
+refuses to close timing.
 
-## Streaming pipeline (dataflow)
-1. **Ingest** — H2C into BRAM line buffers (or DDR3 staging).
-2. **Census transform** 7×7 (48-bit) — 7-row line buffer, 1 descriptor/clk.
-3. **Matching cost** — Hamming (XOR + popcount) over `numDisparities`, with the
-   ±`VSEARCH` row min. Dominant in LUTs; tune the parallel disparity-unit count.
-4. **SGM aggregation** — start with **4 forward paths** (L→R, T→B, 2 diagonals)
-   that stream naturally; backward paths need a second pass / DDR3 frame buffer.
-   uint16 path cost, P1/P2 from registers, uint32 aggregate.
-5. **WTA + uniqueness + parabola subpixel** → disparity int16 ×16 (exact replica
-   of the CPU formula — this is the correctness contract).
-6. **Egress** — C2D the disparity map.
+## Files
+- `hls/sgm_census.hpp` / `sgm_census.cpp` — the HLS top + stages: census 7×7
+  (48-bit), Hamming cost with ±V vertical search, 4-path SGM (L→R, R→L, T→B, B→T)
+  with P1/P2, WTA + uniqueness + parabola subpixel, int16 ×16 output. Single
+  `gmem` AXI-master over DDR3, `ap_ctrl` on s_axilite.
+- `hls/sgm_mem_layout.h` — DDR3 layout + `SgmHwParams` (shared with the host).
+- `hls/tb_sgm_census.cpp` — C testbench: parity vs the CPU golden.
+- `hls/run_hls.tcl` — csim → csynth → cosim → export IP.
+- `vivado/create_project.tcl` — integrate the IP into `xdma_ddr3`, build bitstream
+  + `.mcs`. `constraints/sgm.xdc` — SGM-core-specific timing/config only.
 
-## Milestones
-- [ ] M1 PCIe/XDMA bring-up + AXI-Lite register file + C2D/H2C loopback
-      (validates the host path against `../host` with a trivial core).
-- [ ] M2 Census transform (line-buffered).
-- [ ] M3 Matching cost (Hamming + vertical search).
-- [ ] M4 SGM aggregation (4 paths), WTA + subpixel, ×16 output.
-- [ ] M5 Numeric parity vs CPU SGMCensus on reference rectified pairs.
-- [ ] M6 Timing closure @ target clock, 60 fps on the ROI; utilization report.
+## Operating point (from calibration.yaml)
+Frame 800×600, scan ROI **680×420**, `numDisparities` per working distance (default
+128; Z=96848/d), **vertical search ±2** (mean epipolar 0.383 px / max 2.435 px → ±2
+suffices; the CPU default ±8 is dropped). All are runtime params in `SgmHwParams`;
+the on-chip buffer maxima are `SGM_MAX_*` in `sgm_census.hpp`.
 
-## Layout
-- `rtl/`         — Verilog/SystemVerilog (or HLS) sources.
-- `constraints/` — `.xdc` (pinout, clocks, timing). The current rigoorozco card
-  has a **reversed PCIe lane order** — capture that here.
-- `sim/`         — testbenches + reference vectors (golden disparity from CPU).
-- `vivado/`      — `create_project.tcl` (regenerates the `.xpr`; the project
-  itself is git-ignored). Vivado 2021.2 / 2025.x.
+## Architecture (correctness-first)
+Two raster passes reproduce the CPU's 4 paths exactly: forward (L→R + T→B) stages a
+per-pixel aggregate in DDR3; backward (R→L + B→T) sums it and runs WTA+subpixel
+inline. Census images are precomputed to DDR3 and re-read windowed by both passes.
+DDR3 scratch (`SGM_OFF_*`): census_L/R + forward aggregate ≈ 78 MB at 680×420/D=128
+→ the card needs ≥ ~256 MB DDR3.
 
-## Build (once RTL exists)
+## Throughput (the iteration target)
+This version prioritizes **parity**, not fps. The optimization levers (do them on
+hardware once cosim parity passes): `#pragma HLS dataflow` across stages, on-chip
+cost reuse to avoid the DDR3 forward-aggregate round-trip, `array_partition` on the
+disparity dimension + `pipeline` on the d-loops, and stripe/tile the image. See the
+NOTE blocks in `sgm_census.cpp`.
+
+## Build
 ```
-cd vivado && vivado -mode batch -source create_project.tcl
-# ... synth/impl/bitstream ...
-# copy the bitstream to ../firmware/ as a versioned release (see firmware/README.md)
+cd hls && vitis_hls -f run_hls.tcl              # verify + export IP (needs the .bin vectors)
+cd ../vivado && vivado -mode batch -source create_project.tcl   # bitstream + .mcs
 ```
+See `../RUNBOOK.md` for the end-to-end hardware procedure.

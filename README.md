@@ -20,36 +20,33 @@ matrix and `reprojectImageTo3D` are unchanged.
 ## Layout
 ```
 include/   C ABI header (the contract, synced with the SDK)
-host/      libunlook_fpga_backend.so
-  mock/    synthetic-disparity backend (default; no hardware) -- the test fixture
-  xdma/    real Xilinx XDMA backend (XdmaTransport, FpgaDetector, RegisterMap)
-gateware/  HDL / Vivado project for the SGM-Census core (see gateware/README.md)
+host/      libunlook_fpga_backend.so (real XDMA backend)
+  xdma/    XdmaTransport (mmap BAR + H2C/C2D DMA), FpgaDetector, RegisterMap,
+           xdma_backend (the C ABI: params+images->DDR3, ap_start, poll, readback)
+gateware/  Vitis HLS SGM-Census core + Vivado integration (see gateware/README.md)
 firmware/  released, versioned bitstreams (see firmware/README.md)
+tools/     gen_golden -- CPU reference vectors for the HLS parity test
 tests/     abi_selftest -- dlopen the plugin and exercise probe/create/compute
 ```
 
-## Build
+## Build (host plugin, on the CM5)
 ```bash
-# Mock (default): builds + tests on any Linux host, no FPGA needed.
-cmake -S . -B build -DUNLOOK_FPGA_BACKEND=mock
+cmake -S . -B build
 cmake --build build -j
-ctest --test-dir build --output-on-failure        # runs abi_selftest
-
-# Real hardware (Raspberry CM4/CM5 + XC7A200T + Xilinx xdma kernel module):
-cmake -S . -B build-xdma -DUNLOOK_FPGA_BACKEND=xdma
-cmake --build build-xdma -j
+ctest --test-dir build --output-on-failure   # abi_selftest: SKIPs cleanly with no FPGA
+sudo cmake --install build
 ```
+The SDK's `StereoBackendType::Auto` resolves `libunlook_fpga_backend.so`, and when an
+Unlook XC7A200T is present on PCIe it offloads SGM-Census to it; otherwise CPU fallback.
+Override the location via `scan.fpga.libraryPath` / `[fpga] plugin_path`.
 
-Point the SDK at the result (default search resolves `libunlook_fpga_backend.so`;
-or set `scan.fpga.libraryPath` / the `[fpga] plugin_path` config key to an
-absolute path). With the **mock** built and discoverable, the SDK's `Auto`/`Fpga`
-backend produces a synthetic disparity end-to-end — validating the whole plugin
-path with no Artix-7 attached.
+The gateware (HLS core + bitstream) is built separately — see
+[`gateware/README.md`](gateware/README.md) and the end-to-end [`RUNBOOK.md`](RUNBOOK.md).
 
 ## Status
-- ✅ C ABI + mock backend + XDMA host skeleton + self-test.
-- ⏳ Gateware (HDL) — see [`gateware/README.md`](gateware/README.md) milestones.
-- ⏳ Fase 0 de-risk: confirm PCIe Root Complex on the CM4/CM5 carrier and build
-  the Xilinx `xdma` kernel module on ARM64.
+- ✅ C ABI + real XDMA host backend + HLS SGM-Census core + parity testbench + Vivado
+  integration script + self-test.
+- ⏳ Hardware bring-up (CM5): build the Xilinx `xdma` kernel module on ARM64, flash the
+  bitstream, confirm PCIe enumeration; then verify parity on silicon and tune throughput.
 
 Proprietary — © 2026 Supernova Industries S.r.l. See [LICENSE](LICENSE).

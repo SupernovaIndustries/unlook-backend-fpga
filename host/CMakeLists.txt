@@ -1,21 +1,10 @@
 # libunlook_fpga_backend.so -- the C ABI plugin the Unlook SDK dlopen's.
-# Sources are chosen by UNLOOK_FPGA_BACKEND (mock | xdma); both export the
-# identical symbol set from <unlook_fpga_backend.h>.
+# Real Xilinx XDMA backend: AXI-Lite control (HLS ap_ctrl) + H2C/C2D DMA to DDR3.
 
-if(UNLOOK_FPGA_BACKEND STREQUAL "xdma")
-    set(BACKEND_SOURCES
-        xdma/xdma_backend.cpp
-        xdma/XdmaTransport.cpp
-        xdma/FpgaDetector.cpp)
-elseif(UNLOOK_FPGA_BACKEND STREQUAL "mock")
-    set(BACKEND_SOURCES
-        mock/mock_backend.cpp)
-else()
-    message(FATAL_ERROR
-        "UNLOOK_FPGA_BACKEND must be 'mock' or 'xdma' (got '${UNLOOK_FPGA_BACKEND}')")
-endif()
-
-add_library(unlook_fpga_backend SHARED ${BACKEND_SOURCES})
+add_library(unlook_fpga_backend SHARED
+    xdma/xdma_backend.cpp
+    xdma/XdmaTransport.cpp
+    xdma/FpgaDetector.cpp)
 
 set_target_properties(unlook_fpga_backend PROPERTIES
     CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF
@@ -25,7 +14,8 @@ set_target_properties(unlook_fpga_backend PROPERTIES
 
 target_include_directories(unlook_fpga_backend
     PUBLIC  ${PROJECT_SOURCE_DIR}/include
-    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/xdma)
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/xdma
+            ${PROJECT_SOURCE_DIR}/gateware/hls)   # shared sgm_mem_layout.h
 
 # Hide everything except the documented C ABI symbols.
 target_link_options(unlook_fpga_backend PRIVATE

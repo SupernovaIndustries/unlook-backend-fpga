@@ -3,14 +3,13 @@
 #
 #  Builds libunlook_fpga_backend.so, exporting the stable C ABI in
 #  include/unlook_fpga_backend.h. The Unlook SDK dlopen's it at runtime
-#  (StereoBackendPlugin) to offload SGM-Census to an Artix-7 XC7A200T.
+#  (StereoBackendPlugin) to offload SGM-Census to an Artix-7 XC7A200T over
+#  PCIe/XDMA: H2C the rectified pair into DDR3, run the HLS SGM-Census core,
+#  C2D the int16 (x16) disparity back.
 #
-#  Two interchangeable implementations select the SAME library name:
-#    -DUNLOOK_FPGA_BACKEND=mock   synthetic disparity, no hardware (default)
-#    -DUNLOOK_FPGA_BACKEND=xdma   real Xilinx XDMA path (needs the FPGA + driver)
-#
-#  The gateware (HDL/Vivado) and released bitstreams live under gateware/ and
-#  firmware/ and are built by their own toolchain, not by this CMake.
+#  The gateware (Vitis HLS core + Vivado project) and released bitstreams live
+#  under gateware/ and firmware/ and are built by their own toolchain (HLS /
+#  Vivado), not by this CMake.
 # ===========================================================================
 cmake_minimum_required(VERSION 3.16)
 
@@ -29,11 +28,8 @@ endif()
 set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG -Wall -Wextra")
 set(CMAKE_CXX_FLAGS_DEBUG   "-g -O0 -Wall -Wextra")
 
-set(UNLOOK_FPGA_BACKEND "mock" CACHE STRING
-    "Backend implementation: mock (synthetic, default) or xdma (real hardware)")
-set_property(CACHE UNLOOK_FPGA_BACKEND PROPERTY STRINGS mock xdma)
-
 option(UNLOOK_FPGA_BUILD_TESTS "Build the C ABI self-test" ON)
+option(UNLOOK_FPGA_BUILD_TOOLS "Build gen_golden (needs the Unlook SDK + OpenCV)" OFF)
 
 add_subdirectory(host)
 
@@ -42,9 +38,12 @@ if(UNLOOK_FPGA_BUILD_TESTS)
     add_subdirectory(tests)
 endif()
 
+if(UNLOOK_FPGA_BUILD_TOOLS)
+    add_subdirectory(tools)
+endif()
+
 message(STATUS "================= Unlook FPGA Backend ${PROJECT_VERSION} =================")
-message(STATUS "  backend impl : ${UNLOOK_FPGA_BACKEND}")
 message(STATUS "  build type   : ${CMAKE_BUILD_TYPE}")
 message(STATUS "  tests        : ${UNLOOK_FPGA_BUILD_TESTS}")
-message(STATUS "  output       : libunlook_fpga_backend.so")
+message(STATUS "  output       : libunlook_fpga_backend.so (XDMA)")
 message(STATUS "=============================================================")
