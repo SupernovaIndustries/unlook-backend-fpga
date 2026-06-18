@@ -1,0 +1,47 @@
+# ---- C/C++ host build output ----------------------------------------------
+build/
+build-*/
+out/
+install/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+CTestTestfile.cmake
+compile_commands.json
+*.o
+*.a
+*.so
+*.so.*
+
+# ---- Vivado / Xilinx gateware artifacts ------------------------------------
+# Keep sources (rtl/, constraints/, sim/, the .tcl project generator); ignore
+# the regenerable project + tool output.
+gateware/vivado/*.xpr
+gateware/vivado/*.cache/
+gateware/vivado/*.hw/
+gateware/vivado/*.ip_user_files/
+gateware/vivado/*.runs/
+gateware/vivado/*.sim/
+gateware/vivado/*.gen/
+gateware/vivado/*.srcs/
+gateware/vivado/*.xpr.*
+*.jou
+*.log
+vivado*.str
+vivado_*.backup.*
+.Xil/
+usage_statistics_webtalk.*
+
+# Bitstreams are large binaries: tracked ONLY under firmware/ as versioned
+# release artifacts (use git-lfs there), never from build trees.
+gateware/**/*.bit
+gateware/**/*.bin
+gateware/**/*.ltx
+gateware/**/*.mcs
+
+# ---- Editor / OS -----------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store

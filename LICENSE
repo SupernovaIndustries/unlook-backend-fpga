@@ -1,0 +1,18 @@
+Unlook FPGA Backend
+Copyright (c) 2026 Supernova Industries S.r.l. All rights reserved.
+
+PROPRIETARY AND CONFIDENTIAL.
+
+This software, its source code, and the FPGA gateware (HDL sources, Vivado
+projects, and bitstreams) contained herein are the proprietary and confidential
+property of Supernova Industries S.r.l. Unauthorized copying, distribution,
+modification, public display, or public performance, in whole or in part, by any
+means, is strictly prohibited without the prior written permission of Supernova
+Industries S.r.l.
+
+The SGM-Census stereo-matching algorithm and its FPGA implementation contained
+herein are trade secrets of Supernova Industries S.r.l.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.

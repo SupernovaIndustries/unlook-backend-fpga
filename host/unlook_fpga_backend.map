@@ -1,0 +1,12 @@
+/* Linker version script: export ONLY the documented C ABI. Everything else
+   (XdmaTransport, helpers, C++ runtime detail) stays local. */
+{
+    global:
+        unlook_fpga_plugin_abi_version;
+        unlook_fpga_probe;
+        unlook_fpga_create;
+        unlook_fpga_compute;
+        unlook_fpga_destroy;
+    local:
+        *;
+};
