@@ -1,5 +1,5 @@
 # libunlook_fpga_backend.so -- the C ABI plugin the Unlook SDK dlopen's.
-# Real Xilinx XDMA backend: AXI-Lite control (HLS ap_ctrl) + H2C/C2D DMA to DDR3.
+# Real Xilinx XDMA backend: AXI-Lite control (HLS ap_ctrl) + H2C/C2H DMA to DDR3.
 
 add_library(unlook_fpga_backend SHARED
     xdma/xdma_backend.cpp

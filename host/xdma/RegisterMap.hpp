@@ -11,7 +11,7 @@
  * a single pointer argument, so the host needs no per-build generated header.
  *
  * All pixel/params/disparity traffic goes through DDR3 at the offsets in
- * <sgm_mem_layout.h> (shared with the core), moved by the XDMA H2C/C2D channels.
+ * <sgm_mem_layout.h> (shared with the core), moved by the XDMA H2C/C2H channels.
  */
 
 #include <cstdint>
@@ -36,9 +36,9 @@ constexpr uint32_t AP_IDLE  = 1u << 2;
 constexpr uint32_t AP_READY = 1u << 3;
 
 // ---- DDR3 base address as seen by the core's gmem master -------------------
-// Assigned in the Vivado address editor (gmem -> MIG). The host's H2C/C2D DMA
+// Assigned in the Vivado address editor (gmem -> MIG). The host's H2C/C2H DMA
 // reaches the same DDR3 at the SGM_OFF_* offsets from sgm_mem_layout.h.
-constexpr uint64_t kDdr3Base = 0x0000'0000ull;
+constexpr uint64_t kDdr3Base = 0x8000'0000ull;  // DDR3 (MIG) base on XDMA M_AXI
 
 // PCI vendor id the XDMA endpoint must report (Xilinx) for presence detection.
 constexpr uint16_t kXilinxVendorId = 0x10ee;

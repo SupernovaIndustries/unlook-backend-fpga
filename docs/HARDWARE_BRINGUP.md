@@ -86,7 +86,7 @@ Three fixes are required for this device + the Pi:
    sudo rmmod xdma 2>/dev/null
    sudo insmod xdma.ko poll_mode=1
    echo "10ee 7024" | sudo tee /sys/bus/pci/drivers/xdma/new_id
-   ls -l /dev/xdma*     # expect: xdma0_user, xdma0_h2c_0, xdma0_c2d_0, xdma0_control ...
+   ls -l /dev/xdma*     # expect: xdma0_user, xdma0_h2c_0, xdma0_c2h_0, xdma0_control ...
    ```
 
 ## F. Verify the DMA datapath (DDR3)
@@ -95,7 +95,7 @@ With `/dev/xdma0_*` present, use the repo tools (`app/xdma-tools`) to write/read
 # write 1 MB of random data to DDR3 @ 0x80000000, read it back, compare
 dd if=/dev/urandom of=/tmp/tx.bin bs=1M count=1
 ./dma_to_device   -d /dev/xdma0_h2c_0 -a 0x80000000 -s 0x100000 -f /tmp/tx.bin
-./dma_from_device -d /dev/xdma0_c2d_0 -a 0x80000000 -s 0x100000 -f /tmp/rx.bin
+./dma_from_device -d /dev/xdma0_c2h_0 -a 0x80000000 -s 0x100000 -f /tmp/rx.bin
 cmp /tmp/tx.bin /tmp/rx.bin && echo "DDR3 DMA OK"
 ```
 AXI-Lite registers (our core's ap_ctrl, once the SGM IP is integrated) are reached by

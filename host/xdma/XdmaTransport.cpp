@@ -28,7 +28,7 @@ bool XdmaTransport::fail(const std::string& what) {
 bool XdmaTransport::open() {
     const std::string userPath = prefix_ + "_user";
     const std::string h2cPath  = prefix_ + "_h2c_0";
-    const std::string c2dPath  = prefix_ + "_c2d_0";
+    const std::string c2hPath  = prefix_ + "_c2h_0";
 
     userFd_ = ::open(userPath.c_str(), O_RDWR | O_SYNC);
     if (userFd_ < 0) return fail("open " + userPath);
@@ -36,8 +36,8 @@ bool XdmaTransport::open() {
     h2cFd_ = ::open(h2cPath.c_str(), O_WRONLY);
     if (h2cFd_ < 0) return fail("open " + h2cPath);
 
-    c2dFd_ = ::open(c2dPath.c_str(), O_RDONLY);
-    if (c2dFd_ < 0) return fail("open " + c2dPath);
+    c2hFd_ = ::open(c2hPath.c_str(), O_RDONLY);
+    if (c2hFd_ < 0) return fail("open " + c2hPath);
 
     userMap_ = ::mmap(nullptr, kUserMapLen, PROT_READ | PROT_WRITE,
                       MAP_SHARED, userFd_, 0);
@@ -51,7 +51,7 @@ bool XdmaTransport::open() {
 
 void XdmaTransport::close() {
     if (userMap_) { ::munmap(userMap_, userMapLen_); userMap_ = nullptr; }
-    if (c2dFd_  >= 0) { ::close(c2dFd_);  c2dFd_  = -1; }
+    if (c2hFd_  >= 0) { ::close(c2hFd_);  c2hFd_  = -1; }
     if (h2cFd_  >= 0) { ::close(h2cFd_);  h2cFd_  = -1; }
     if (userFd_ >= 0) { ::close(userFd_); userFd_ = -1; }
 }
@@ -91,18 +91,18 @@ bool XdmaTransport::writeH2C(const void* src, size_t bytes, uint64_t cardAddr) {
     return true;
 }
 
-bool XdmaTransport::readC2D(void* dst, size_t bytes, uint64_t cardAddr) {
-    if (c2dFd_ < 0) return fail("readC2D: channel not open");
+bool XdmaTransport::readC2H(void* dst, size_t bytes, uint64_t cardAddr) {
+    if (c2hFd_ < 0) return fail("readC2H: channel not open");
     uint8_t* p = static_cast<uint8_t*>(dst);
     size_t done = 0;
     while (done < bytes) {
-        const ssize_t n = ::pread(c2dFd_, p + done, bytes - done,
+        const ssize_t n = ::pread(c2hFd_, p + done, bytes - done,
                                   static_cast<off_t>(cardAddr + done));
         if (n < 0) {
             if (errno == EINTR) continue;
-            return fail("readC2D pread");
+            return fail("readC2H pread");
         }
-        if (n == 0) return fail("readC2D short read");
+        if (n == 0) return fail("readC2H short read");
         done += static_cast<size_t>(n);
     }
     return true;

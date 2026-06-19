@@ -8,7 +8,7 @@
  *      at the fixed offsets in sgm_mem_layout.h;
  *   2. point the core's gmem master at the DDR3 base (AXI-Lite) and set ap_start;
  *   3. poll ap_done with a steady-clock timeout;
- *   4. read the int16 (x16) disparity back from DDR3 (C2D).
+ *   4. read the int16 (x16) disparity back from DDR3 (C2H).
  *
  * Disparity is int16 scaled x16 (invalid == 0) -- the exact SGMCensus layout, so
  * the SDK's Q matrix / reprojectImageTo3D is unchanged. Never throws.
@@ -161,8 +161,8 @@ int unlook_fpga_compute(void* handle,
     }
 
     // 4. disparity <- DDR3
-    if (!t.readC2D(disparityX16Out, dispBytes, reg::kDdr3Base + SGM_OFF_DISP))
-        return bail("C2D disparity");
+    if (!t.readC2H(disparityX16Out, dispBytes, reg::kDdr3Base + SGM_OFF_DISP))
+        return bail("C2H disparity");
 
     long long valid = 0;
     for (size_t i = 0; i < imgBytes; ++i) if (disparityX16Out[i] != 0) ++valid;

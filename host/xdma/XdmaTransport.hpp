@@ -5,7 +5,7 @@
  * @brief Thin RAII wrapper over the Xilinx XDMA character devices.
  *
  * Opens the `_user` BAR (AXI-Lite registers, via mmap), and the `_h2c_0` /
- * `_c2d_0` bulk DMA channels (via pwrite/pread). All methods return bool and
+ * `_c2h_0` bulk DMA channels (via pwrite/pread). All methods return bool and
  * never throw, mirroring the Unlook SDK hardware-controller conventions.
  *
  * One transport instance == one open device, owned by one matcher; not
@@ -26,7 +26,7 @@ public:
     XdmaTransport(const XdmaTransport&) = delete;
     XdmaTransport& operator=(const XdmaTransport&) = delete;
 
-    /// Open _user (mmap the AXI-Lite BAR) + _h2c_0 + _c2d_0. false on any failure.
+    /// Open _user (mmap the AXI-Lite BAR) + _h2c_0 + _c2h_0. false on any failure.
     bool open();
     bool isOpen() const { return userMap_ != nullptr; }
 
@@ -36,7 +36,7 @@ public:
 
     /// Bulk DMA. cardAddr is the offset into card memory (see RegisterMap).
     bool writeH2C(const void* src, size_t bytes, uint64_t cardAddr);
-    bool readC2D(void* dst, size_t bytes, uint64_t cardAddr);
+    bool readC2H(void* dst, size_t bytes, uint64_t cardAddr);
 
     int dmaTimeoutMs() const { return dmaTimeoutMs_; }
     const std::string& devicePrefix() const { return prefix_; }
@@ -50,7 +50,7 @@ private:
     int         dmaTimeoutMs_ = 33;
     int         userFd_ = -1;
     int         h2cFd_  = -1;
-    int         c2dFd_  = -1;
+    int         c2hFd_  = -1;
     void*       userMap_ = nullptr;
     size_t      userMapLen_ = 0;
     std::string lastError_;

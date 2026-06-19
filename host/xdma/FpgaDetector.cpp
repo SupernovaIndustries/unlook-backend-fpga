@@ -51,10 +51,10 @@ ProbeResult probeFpga(const std::string& devicePrefix) {
 
     const std::string userNode = devicePrefix + "_user";
     const std::string h2cNode  = devicePrefix + "_h2c_0";
-    const std::string c2dNode  = devicePrefix + "_c2d_0";
-    if (!nodeExists(userNode) || !nodeExists(h2cNode) || !nodeExists(c2dNode)) {
+    const std::string c2hNode  = devicePrefix + "_c2h_0";
+    if (!nodeExists(userNode) || !nodeExists(h2cNode) || !nodeExists(c2hNode)) {
         r.detail = "XDMA device nodes missing (" + devicePrefix +
-                   "_user/_h2c_0/_c2d_0) -- driver loaded?";
+                   "_user/_h2c_0/_c2h_0) -- driver loaded?";
         return r;
     }
 
